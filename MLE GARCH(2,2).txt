@@ -1,0 +1,64 @@
+
+##The following code is used to simulate a GARCH(2,2) model with N=1100 data points 
+##with a burn-in of n=100 data points
+library(fGarch)
+N <- 11100  #Run size
+n <- 1100  #Burn-in size
+a <- c(0.8, 0.1,0.25,0.15,0.3)  #GARCH(2,2) parameters theta=(omega,alpha1,alpha2,beta1,beta2), dim=5
+
+# Generate the GARCH(2,2) process iteratively by its definition
+garch_22 = function(params,size) {
+	y <- double(N)  #Actual data
+	s <-double(N) #Volatility: s=sigma^2
+
+	#define the starting distribution for y1 and s1
+	y[1] <- 0.1 
+	s[1] <- 0.01
+	y[2] <- 0.1
+	s[2] <- 0.01
+
+	e <- rnorm(N)  #Assume errors~Normal(0,1) 
+
+	for(i in 3:N)  {
+  		s[i] <- params[1]+params[2]*y[i-1]^2+params[3]*y[i-2]^2+params[4]*s[i-1]+params[5]*s[i-2] 
+  		y[i] <- sqrt(s[i])*e[i]
+	}
+	return(y)
+}
+
+#Simulated true data of the previously defined GARCH(1,1) process
+ygarch <- garch_22(a,N)[(n+1):N]
+
+plot(ygarch,type='l',main="Time series plot of the simulated GARCH(2,2) process")
+####################################################################################
+##The following code fits the true data to a GARCH(2,2) process the MLE approach 
+##(using R's garchFit function)
+
+# Fit GARCH(2,2) using MLE method
+#Using different MLE algorithms (total 4 runs)
+
+#mle_garch <- garchFit(data=ygarch, algorithm = c("nlminb", "lbfgsb", "nlminb+nm", "lbfgsb+nm")) 
+
+mle_garch <- garchFit(formula =  ~ garch(2,2), data=ygarch, algorithm = "lbfgsb+nm")
+mle_garch@fit$matcoef
+
+
+b <- c(0.66872912,0.16851704,0.57509282)
+
+#Simulate the MLE-fitted GARCH(1,1) process using the same starting distribution
+mlegarch <- garch_11(b,N)[(n+1):N]
+
+
+##Validate the fitting results
+#Plot the time series plot of MLE-fitted data vs true data 
+par(mfrow=c(1,2))
+plot(ygarch,type='l',main="GARCH(1,1) of true data")
+plot(mlegarch,type='l',main="GARCH(1,1) of MLE-fitted data")
+
+#plot the differences in a time series
+diff1 = mlegarch-ygarch
+plot(diff1,type='l')
+
+#Compare the 2 data sets using statistical summary
+summary(ygarch)
+summary(mlegarch)

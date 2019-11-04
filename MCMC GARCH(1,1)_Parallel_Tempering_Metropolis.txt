@@ -1,0 +1,148 @@
+
+##The following code is used to simulate a GARCH(1,1) model with N=5000 data points 
+##with a burn-in of n=1000 data points
+library(fGarch)
+library(truncnorm)
+N <- 2100  #Run size
+n <- 100  #Burn-in size
+a <- c(0.8, 0.2, 0.5)  #GARCH(1,1) parameters theta=(omega,alpha,beta), dim=3
+
+# Generate the GARCH(1,1) process iteratively by its definition
+garch_11 = function(params,size) {
+	y <- double(N)  #Actual data
+	s <-double(N) #Volatility: s=sigma^2
+
+	#define the starting distribution for y1 and s1
+	y[1] <- 0.1
+	s[1] <- 0.01
+
+	e <- rnorm(N)  #Assume errors~Normal(0,1) 
+
+	for(i in 2:N)  {
+  		s[i] <- params[1]+params[2]*y[i-1]^2+params[3]*s[i-1]    
+  		y[i] <- sqrt(s[i])*e[i]
+	}
+	return(y)
+}
+
+#Simulated true data of the previously defined GARCH(1,1) process
+ygarch <- garch_11(a,N)[(n+1):N]
+####################################################################################
+##The following code fits the true data to a GARCH(1,1) process the MLE approach 
+##(using R's garchFit function)
+
+# Fit GARCH(1,1) using MCMC method
+g0 = function(s,y) { return( -0.5*log(s)-0.5*(y^2/s) ) }
+g =  function(x) {
+	#define the starting distribution for s1
+	s <- 0.01
+	gg <- g0(s,ygarch[1])
+
+	for(i in 2:length(ygarch))  {
+  	s <- x[1]+x[2]*ygarch[i-1]^2+x[3]*s
+	gg <- gg+g0(s,ygarch[i]) 
+	}	
+
+	return(gg) 
+} 
+
+g2 = function(x, thetemp) {
+  if ( (thetemp<1) || (thetemp>maxtemp) )
+    return(0.0)
+  else
+    return( (1/thetemp)*g(x) )
+}
+
+M = 10000  # run length
+sigma = 0.1  # proposal scaling
+maxtemp = 5
+x1list = x2list = x3list = matrix( rep(0,M*maxtemp), ncol=maxtemp )  # for chain values
+numxaccept = rep(0,maxtemp)
+numtempaccept = 0;
+X = rbind(t(runif(maxtemp)),t(runif(maxtemp)),t(runif(maxtemp)))  # overdispersed starting distribution
+
+for (i in 1:M) {
+  for (temp in 1:maxtemp) {
+    # PROPOSED X[,temp] MOVE
+    Y = X[,temp] + sigma * rnorm(1)  # proposal move
+    U = log(runif(1))  # for accept/reject
+    A = g2(Y,temp) - g2(X[,temp],temp)  # for accept/reject
+    if ( (sum(Y>0)==3) && U < A) {
+	X[,temp] = Y  # accept proposal
+        numxaccept[temp] = numxaccept[temp] + 1;
+    }
+  }
+  # PROPOSED TEMP SWAP
+    j = floor(1+runif(1,0,maxtemp))  # uniform on {1,2,...,maxtemp}
+    k = floor(1+runif(1,0,maxtemp))  # uniform on {1,2,...,maxtemp}
+    U = log(runif(1))  # for accept/reject
+    A = g2(X[,j],k) + g2(X[,k],j) - g2(X[,j],j) - g2(X[,k],k); 
+    if ((sum(Y>0)==3) && U < A) { #Reject samples where any parameter is negative
+	# accept proposed swap
+	tmpval = X[,j];
+	X[,j] = X[,k];
+	X[,k] = tmpval;
+        numtempaccept = numtempaccept + 1;
+    }
+  x1list[i,] = X[1,];
+  x2list[i,] = X[2,];
+  x3list[i,] = X[3,];
+    # Output progress report.
+    if ((i %% 500) == 0)
+      cat (" ...",i);
+}
+
+############################################################################################
+B=100
+valx1list = x1list[((B+1):M),1];
+valx2list = x2list[((B+1):M),1];
+valx3list = x3list[((B+1):M),1];
+
+cat("x acceptance rate =", numxaccept/M, "\n");
+cat("temp acceptance rate =", numtempaccept/M, "\n");
+
+u = mean(valx1list)
+cat("mean of x1 is about", u, "\n")
+v = mean(valx2list)
+cat("mean of x2 is about", v, "\n")
+w = mean(valx3list)
+cat("mean of x3 is about", w, "\n")
+
+varfact <- function(xxx) { 2 * sum(acf(xxx, plot=FALSE)$acf) - 1 }
+
+se11 =  sd(valx1list) / sqrt(length(valx1list))
+thevarfact1 = varfact(valx1list)
+se1 = se11 * sqrt(thevarfact1)
+cat("true standard error of omega is about", se1, "\n")
+
+se12 =  sd(valx2list) / sqrt(length(valx2list))
+thevarfact2 = varfact(valx2list)
+se2 = se12 * sqrt(thevarfact2)
+cat("true standard error of alpha is about", se2, "\n")
+
+se13 =  sd(valx3list) / sqrt(length(valx3list))
+thevarfact3 = varfact(valx3list)
+se3 = se13 * sqrt(thevarfact3)
+cat("true standard error of beta is about", se3, "\n")
+
+par(mfrow=c(1,3))
+plot(x1list[,1],type='l',main="Time series plot of omega with tau=1")
+plot(x2list[,1],type='l',main="Time series plot of alpha with tau=1")
+plot(x3list[,1],type='l',main="Time series plot of beta with tau=1")
+
+par(mfrow=c(1,3))
+plot(x1list[,5],type='l',main="Time series plot of omega with tau=5")
+plot(x2list[,5],type='l',main="Time series plot of alpha with tau=5")
+plot(x3list[,5],type='l',main="Time series plot of beta with tau=5")
+
+par(mfrow=c(1,3))
+acf(x1list[,1],lag.max=250,main="Autocorrelation plot of omega with tau=1")
+acf(x1list[,1],lag.max=250,main="Autocorrelation plot of alpha with tau=1")
+acf(x1list[,1],lag.max=250,main="Autocorrelation plot of beta with tau=1")
+
+par(mfrow=c(1,3))
+acf(x1list[,1],lag.max=250,main="Autocorrelation plot of omega with tau=5")
+acf(x1list[,1],lag.max=250,main="Autocorrelation plot of alpha with tau=5")
+acf(x1list[,1],lag.max=250,main="Autocorrelation plot of beta with tau=5")
+#####################################################################################################
+

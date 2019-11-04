@@ -1,0 +1,177 @@
+
+##The following code is used to simulate a GARCH(2,2) model with N=1100 data points 
+##with a burn-in of n=100 data points
+library(fGarch)
+library(mvtnorm)
+N <- 1100  #Run size
+n <- 100  #Burn-in size
+a <- c(0.8, 0.1,0.25,0.15,0.3)  #GARCH(2,2) parameters theta=(omega,alpha1,alpha2,beta1,beta2), dim=5
+
+# Generate the GARCH(2,2) process iteratively by its definition
+garch_22 = function(params,size) {
+	y <- double(N)  #Actual data
+	s <-double(N) #Volatility: s=sigma^2
+
+	#define the starting distribution for y1 and s1
+	y[1] <- 0.1
+	s[1] <- 0.01
+	y[2] <- 0.1 
+	s[2] <- 0.01
+
+	set.seed(1234) #Make sure the same data series is generated
+	e <- rnorm(N)  #Assume errors~Normal(0,1) 
+
+	for(i in 3:N)  {
+  		s[i] <- params[1]+params[2]*y[i-1]^2+params[3]*y[i-2]^2+params[4]*s[i-1]+params[5]*s[i-2] 
+  		y[i] <- sqrt(s[i])*e[i]
+	}
+	return(y)
+}
+
+#Simulated true data of the previously defined GARCH(1,1) process
+ygarch <- garch_22(a,N)[(n+1):N]
+
+plot(ygarch,type='l',main="Time series plot of the simulated GARCH(2,2) process")
+####################################################################################
+## Fit GARCH(2,2) using the Adaptive-Metropolis algorithm
+
+#Iteratively calculate the logged posterior distribution
+g0 = function(s,y) { return( -0.5*log(s)-0.5*(y^2/s) ) } 
+g =  function(x) {
+	#define the starting distribution for s1 and s2
+	s <- double(N) 
+	s[1] <- 0.01
+	s[2] <- 0.01
+	gg <- g0(s[1],ygarch[1]) + g0(s[2],ygarch[2])
+
+	for(i in 3:length(ygarch))  {
+  	s[i] <- x[1]+x[2]*ygarch[i-1]^2+x[3]*ygarch[i-2]^2+x[4]*s[i-1]+x[5]*s[i-2]
+	gg <- gg+g0(s[i],ygarch[i]) 
+	}	
+
+	return(gg) 
+} 
+
+dim = 5
+identity = diag(dim)
+M = 40000  # run length
+B = 20000  # amount of burn-in
+X = c(runif(1),runif(1),runif(1),runif(1),runif(1))  # overdispersed starting distribution, dim=5
+x1list = x2list = x3list = x4list = x5list = rep(0,M)  # for keeping track of chain values
+Xveclist = matrix( rep(0,M*dim), ncol=dim)  # full chain values: contains all 5 dimensions
+numaccept = 0;
+epsilon = 0.01;
+mult = 0.1; 
+
+for (i in 1:M) {
+    #update the covariance matrix
+    if (i < dim^2) {
+      propSigma = identity
+    }
+    else {
+      covsofar = cov( Xveclist[ (1:(i-1)) ,] )
+      propSigma = mult * covsofar + epsilon * identity
+    }
+
+    #Metropolis algorithm
+    Y = X + rmvnorm(1, sigma = propSigma)  # proposal value with dim=5
+
+    U = log(runif(1))  # for accept/reject
+    alpha = g(Y) - g(X)  # for accept/reject
+    if ( (sum(Y>0)==5) && U < alpha) { #Reject samples where any parameter is negative
+	X = Y  # accept proposal
+        numaccept = numaccept + 1;
+    }
+
+    x1list[i] = X[1];
+    x2list[i] = X[2];
+    x3list[i] = X[3];
+    x4list[i] = X[4];
+    x5list[i] = X[5];
+    Xveclist[i,] = X;
+    # Output progress report.
+    if ((i %% 1000) == 0)
+      cat (" ...",i);
+} 
+######################################################################################
+B=1000
+cat("acceptance rate =", numaccept/M, "\n");
+u = mean(x1list[(B+1):M])
+cat("mean of x1 is about", u, "\n")
+v = mean(x2list[(B+1):M])
+cat("mean of x2 is about", v, "\n")
+w = mean(x3list[(B+1):M])
+cat("mean of x3 is about", w, "\n")
+y = mean(x4list[(B+1):M])
+cat("mean of x4 is about", y, "\n")
+z = mean(x5list[(B+1):M])
+cat("mean of x5 is about", z, "\n")
+
+varfact <- function(xxx) { 2 * sum(acf(xxx, plot=FALSE)$acf) - 1 }
+
+se11 =  sd(x1list[(B+1):M]) / sqrt(M-B)
+thevarfact1 = varfact(x1list[(B+1):M])
+se1 = se11 * sqrt( thevarfact1 )
+cat("true standard error of omega is about", se1, "\n")
+cat("approximate 95% confidence interval of omega is (", u - 1.96 * se1, ",",
+						u + 1.96 * se1, ")\n\n")
+
+se12 =  sd(x2list[(B+1):M]) / sqrt(M-B)
+thevarfact2 = varfact(x2list[(B+1):M])
+se2 = se12 * sqrt( thevarfact2 )
+cat("true standard error of alpha is about", se2, "\n")
+cat("approximate 95% confidence interval of alpha is (", v - 1.96 * se2, ",",
+						v + 1.96 * se2, ")\n\n")
+
+
+se13 =  sd(x3list[(B+1):M]) / sqrt(M-B)
+thevarfact3 = varfact(x3list[(B+1):M])
+se3 = se13 * sqrt( thevarfact3 )
+cat("true standard error of beta is about", se3, "\n")
+cat("approximate 95% confidence interval of alpha is (", w - 1.96 * se3, ",",
+						w + 1.96 * se3, ")\n\n")
+
+se14 =  sd(x4list[(B+1):M]) / sqrt(M-B)
+thevarfact4 = varfact(x4list[(B+1):M])
+se4 = se14 * sqrt( thevarfact4 )
+cat("true standard error of beta is about", se4, "\n")
+cat("approximate 95% confidence interval of alpha is (", w - 1.96 * se4, ",",
+						w + 1.96 * se4, ")\n\n")
+
+
+se15 =  sd(x5list[(B+1):M]) / sqrt(M-B)
+thevarfact5 = varfact(x5list[(B+1):M])
+se5 = se15 * sqrt( thevarfact5 )
+cat("true standard error of beta is about", se5, "\n")
+cat("approximate 95% confidence interval of alpha is (", w - 1.96 * se5, ",",
+						w + 1.96 * se5, ")\n\n")
+
+
+par(mfrow=c(2,3))
+plot(x1list,type='l',main="Time series plot of omega")
+plot(x2list,type='l',main="Time series plot of alpha1")
+plot(x3list,type='l',main="Time series plot of alpha2")
+plot(x4list,type='l',main="Time series plot of beta1")
+plot(x5list,type='l',main="Time series plot of beta2")
+
+par(mfrow=c(2,3))
+acf(x1list,lag.max=550,main="Autocorrelation plot of omega")
+acf(x2list,lag.max=550,main="Autocorrelation plot of alpha1")
+acf(x3list,lag.max=550,main="Autocorrelation plot of alpha2")
+acf(x4list,lag.max=550,main="Autocorrelation plot of beta1")
+acf(x5list,lag.max=550,main="Autocorrelation plot of beta2")
+#####################################################################################################
+##Visual comparison of the original data vs simulated data using the Adaptive-Metropolis algorithm
+#Simulate the MCMC-fitted GARCH(2,2) process 
+mcmc <- c(0.82,0.12,0.23,0.16,0.28)
+mcmcgarch <- garch_22(mcmc,N)[(n+1):N]
+diff=mcmcgarch-ygarch
+
+#Plot the time series plot of the MCMC-fitted data vs true data 
+windows()
+par(mfrow=c(3,1))
+plot(ygarch,type='l',main="GARCH(2,2) of true data")
+plot(mcmcgarch,type='l',main="GARCH(2,2) of simulated data using the Adaptive-Metropolis algorithm")
+plot(diff,type='l',main="Error")
+
+

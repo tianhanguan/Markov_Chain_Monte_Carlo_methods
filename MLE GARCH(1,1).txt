@@ -1,0 +1,58 @@
+
+##The following code is used to simulate a GARCH(1,1) model with N=2100 data points 
+##with a burn-in period of n=100 data points
+library(fGarch)
+N <- 2100  #Run size
+n <- 100  #Burn-in size
+a <- c(0.8, 0.2, 0.5)  #GARCH(1,1) parameters theta=(omega,alpha,beta), dim=3
+
+# Generate the GARCH(1,1) process iteratively by its definition
+garch_11 = function(params,size) {
+	y <- double(N)  #Actual data
+	s <-double(N) #Volatility: s=sigma^2
+
+	#define the starting distribution for y1 and s1
+	y[1] <- rnorm(1) 
+	s[1] <- 0
+
+	e <- rnorm(N)  #Assume errors~Normal(0,1) 
+
+	for(i in 2:N)  {
+  		s[i] <- params[1]+params[2]*y[i-1]^2+params[3]*s[i-1]    
+  		y[i] <- sqrt(s[i])*e[i]
+	}
+	return(y)
+}
+
+#Simulated true data of the previously defined GARCH(1,1) process
+ygarch <- garch_11(a,N)[(n+1):N]
+
+#Plot the GARCH(1,1) time series
+plot(ygarch,type='l',main="Time series plot of the simulated GARCH(1,1) process")
+####################################################################################
+##The following code fits the true data to a GARCH(1,1) process using the MLE approach 
+##(using R's garchFit function)
+
+# Fit GARCH(1,1) using the MLE method and show its estimated parameters
+mle_garch <- garchFit(data=ygarch, algorithm = "lbfgsb+nm")
+mle_garch@fit$matcoef
+########################################################################################################
+##Visual comparison of the original data vs simulated data using 1)MCMC 2)MLE
+#Simulate the MLE-fitted GARCH(2,2) process using the same starting distribution
+b <- c(0.66872912,0.16851704,0.57509282)
+mlegarch <- garch_11(b,N)[(n+1):N]
+
+
+##Validate the fitting results
+#Plot the time series plot of MLE-fitted data vs true data 
+par(mfrow=c(1,2))
+plot(ygarch,type='l',main="GARCH(1,1) of true data")
+plot(mlegarch,type='l',main="GARCH(1,1) of MLE-fitted data")
+
+#plot the differences in a time series
+diff1 = mlegarch-ygarch
+plot(diff1,type='l')
+
+#Compare the 2 data sets using statistical summary
+summary(ygarch)
+summary(mlegarch)
